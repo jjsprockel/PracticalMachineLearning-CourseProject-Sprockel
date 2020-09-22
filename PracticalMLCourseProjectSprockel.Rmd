@@ -1,0 +1,160 @@
+---
+title: "Predicting Possition from Accelerometers Data by Machine Learning and Assembly "
+author: "John Sprockel"
+date: "9/21/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Summary
+
+In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants (that were asked to perform barbell lifts correctly and incorrectly in 5 different ways) for predict the manner in which they did the exercise.
+
+## Introduction
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+## Loading the Database and Libraries
+
+```{r, results='hide'}
+library(caret)
+library(mlbench)
+
+library(readr)
+pmltrain <- read_csv("pml-training.csv")
+pmltest <- read_csv("pml-testing.csv")
+```
+
+## Data Exporation 
+
+```{r, results='hide'}
+str(pmltrain)
+```
+
+In the first instance, we notice that a set of variables contains few data, with NA predominating, so we eliminate them from the database. The same with the identification, data and time. The Variable **classe** is the outcome: the manner in which the exercise was done.
+
+The data will be divided into three populations (training, testing and validation) in order to make an assembly.
+
+```{r, results='hide'}
+tr <- pmltrain[, c(7:11, 37:49, 60:68, 84:86, 102, 113:124, 140, 151:160)]
+inTrain = createDataPartition(tr$classe, p = 0.7)[[1]]
+training = tr[ inTrain,]
+testing = tr[-inTrain,]
+
+validation <- pmltest[, c(7:11, 37:49, 60:68, 84:86, 102, 113:124, 140, 151:160)]
+
+str(training)
+summary(training)
+any(is.na(training)) #there is no missing data (NA)
+```
+
+```{r}
+featurePlot(x=training[, c(2, 39, 41, 42)], y = training$classe, plot="pairs")
+```
+
+## Feature Selection
+
+A mechanism to perform the selection of characteristics is to take advantage of the property of some algorithms to qualify the importance of some variables in the training process, such as decision trees or regularized random forests. I select the first six more important variables.
+
+```{r}
+set.seed(523)
+rPartMod <- train(classe ~ ., data=training, method="rpart")
+rpartImp <- varImp(rPartMod)
+print(rpartImp)
+
+plot(rpartImp, top = 15, main='Variable Importance')
+
+finalTrain <- training [, c(2, 39, 41, 42, 54)]
+finalTest <- testing [, c(2, 39, 41, 42, 54)]
+finalValid<- validation [, c(2, 39, 41, 42, 54)]
+```
+
+
+## Training the Machine Learning Models
+
+Within this report I will use five different models in caret: a) CARD model: "rpart", b) neural network: "nnet", c) boosted trees: "gbm", d) linear discriminant analysis: "lda", e) support vector machines: "svmRadial". As well as its respective assembly by rf.
+
+```{r, cache=TRUE}
+set.seed(3452)
+model1<- train(classe~ ., data= finalTrain, method="rpart")
+```
+
+```{r, cache=TRUE, results='hide'}
+model2<- train(classe~ ., data= finalTrain, method="nnet", verbose=FALSE)
+```
+
+```{r, cache=TRUE}
+model3<- train(classe~ ., data= finalTrain, method="gbm", verbose=FALSE)
+```
+
+```{r, cache=TRUE}
+model4<- train(classe~ ., data= finalTrain, method="lda")
+```
+
+```{r, cache=TRUE}
+model5<- train(classe~ ., data= finalTrain, method="svmRadial")
+```
+
+```{r, cache=TRUE}
+t11 <- predict(model1,newdata= finalTrain)
+t21 <- predict(model2,newdata= finalTrain)
+t31 <- predict(model3,newdata= finalTrain)
+t41 <- predict(model4,newdata= finalTrain)
+t51 <- predict(model5,newdata= finalTrain)
+
+t12 <- predict(model1,newdata= finalTest)
+t22 <- predict(model2,newdata= finalTest)
+t32 <- predict(model3,newdata= finalTest)
+t42 <- predict(model4,newdata= finalTest)
+t52 <- predict(model5,newdata= finalTest)
+
+predE1 <-data.frame(t12, t22, t32, t42, t52, classe = finalTest$classe) 
+ensambl <- train(classe ~.,method="rf",data=predE1)
+combPred1 <- predict(ensambl,predE1)
+```
+
+## Results
+
+The table presents the result of the models trained and tested, and its assemble. 
+
+```{r, cache=TRUE}
+models <- c("rpart", "nnet", "gbm", "lda", "svmRadial", "asemble")
+
+train_Acc<- c(confusionMatrix(as.factor(finalTrain$classe),t11)$overall['Accuracy'], 
+              confusionMatrix(as.factor(finalTrain$classe),t21)$overall['Accuracy'],
+              confusionMatrix(as.factor(finalTrain$classe),t31)$overall['Accuracy'], 
+              confusionMatrix(as.factor(finalTrain$classe),t41)$overall['Accuracy'],
+              confusionMatrix(as.factor(finalTrain$classe),t51)$overall['Accuracy'], NA)
+    
+testAcc <- c(confusionMatrix(as.factor(finalTest$classe),t12)$overall['Accuracy'], 
+             confusionMatrix(as.factor(finalTest$classe),t22)$overall['Accuracy'],
+             confusionMatrix(as.factor(finalTest$classe),t32)$overall['Accuracy'], 
+             confusionMatrix(as.factor(finalTest$classe),t42)$overall['Accuracy'],
+             confusionMatrix(as.factor(finalTest$classe),t52)$overall['Accuracy'], 
+             confusionMatrix(as.factor(finalTest$classe),combPred1)$overall['Accuracy'])
+
+result<- cbind(models, train_Acc, testAcc)
+result
+``` 
+
+### Comparing the Models
+
+```{r}
+results <- resamples(list(CARD =model1, ANN =model2, BOOST=model3, LDA =model4, SVM = model5, ASEMBL = ensambl))
+summary(results)
+bwplot(results)
+dotplot(results)
+```
+
+
+## Conclussion
+
+We found that the worst performance was the simple perceptron and the linear discriminant analysis, followed by the CARD model. The SVM showed adequate performance. It is striking that the boosting was slightly worse than the assembly of all the models using random forest.
+
+
+## Referencia
+
+1. Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6.(http://groupware.les.inf.puc-rio.br/har)
